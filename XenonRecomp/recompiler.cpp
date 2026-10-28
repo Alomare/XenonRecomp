@@ -849,24 +849,27 @@ bool Recompiler::Recompile(
         println("{}.u32) & ~127), 0, 128);", r(insn.operands[1]));
         break;
 
+    // Division by zero, and signed division of the minimum value by -1, leave
+    // the result undefined on PowerPC but trap on x86. They give 0 here, like
+    // the PPE in other emulators.
     case PPC_INST_DIVD:
-        println("\t{}.s64 = {}.s64 / {}.s64;", r(insn.operands[0]), r(insn.operands[1]), r(insn.operands[2]));
+        println("\t{0}.s64 = {2}.s64 == 0 || ({1}.s64 == INT64_MIN && {2}.s64 == -1) ? 0 : {1}.s64 / {2}.s64;", r(insn.operands[0]), r(insn.operands[1]), r(insn.operands[2]));
         break;
 
     case PPC_INST_DIVDU:
-        println("\t{}.u64 = {}.u64 / {}.u64;", r(insn.operands[0]), r(insn.operands[1]), r(insn.operands[2]));
+        println("\t{0}.u64 = {2}.u64 == 0 ? 0 : {1}.u64 / {2}.u64;", r(insn.operands[0]), r(insn.operands[1]), r(insn.operands[2]));
         if (strchr(insn.opcode->name, '.'))
             println("\t{}.compare<int32_t>({}.s32, 0, {});", cr(0), r(insn.operands[0]), xer());
         break;
 
     case PPC_INST_DIVW:
-        println("\t{}.s32 = {}.s32 / {}.s32;", r(insn.operands[0]), r(insn.operands[1]), r(insn.operands[2]));
+        println("\t{0}.s32 = {2}.s32 == 0 || ({1}.s32 == INT32_MIN && {2}.s32 == -1) ? 0 : {1}.s32 / {2}.s32;", r(insn.operands[0]), r(insn.operands[1]), r(insn.operands[2]));
         if (strchr(insn.opcode->name, '.'))
             println("\t{}.compare<int32_t>({}.s32, 0, {});", cr(0), r(insn.operands[0]), xer());
         break;
 
     case PPC_INST_DIVWU:
-        println("\t{}.u32 = {}.u32 / {}.u32;", r(insn.operands[0]), r(insn.operands[1]), r(insn.operands[2]));
+        println("\t{0}.u32 = {2}.u32 == 0 ? 0 : {1}.u32 / {2}.u32;", r(insn.operands[0]), r(insn.operands[1]), r(insn.operands[2]));
         if (strchr(insn.opcode->name, '.'))
             println("\t{}.compare<int32_t>({}.s32, 0, {});", cr(0), r(insn.operands[0]), xer());
         break;
