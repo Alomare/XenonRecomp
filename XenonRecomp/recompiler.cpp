@@ -613,7 +613,10 @@ bool Recompiler::Recompile(
     case PPC_INST_BCTR:
         if (switchTable != config.switchTables.end())
         {
-            println("\tswitch ({}.u64) {{", r(switchTable->second.r));
+            // The guest bounds-checks the index with cmplwi, so only its low
+            // word is known to be in range. rlwinm with a wrapping mask leaves
+            // a copy of the word in the high half.
+            println("\tswitch ({}.u32) {{", r(switchTable->second.r));
 
             for (size_t i = 0; i < switchTable->second.labels.size(); i++)
             {
