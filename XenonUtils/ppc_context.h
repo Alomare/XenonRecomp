@@ -682,6 +682,24 @@ inline simde__m128i simde_mm_vctsxs(simde__m128 src1)
     return simde_mm_andnot_si128(simde_mm_castps_si128(xmm2), simde_mm_castps_si128(dest));
 }
 
+inline simde__m128i simde_mm_vctuxs(simde__m128 src1)
+{
+    // Truncate toward zero, saturating to [0, UINT32_MAX]; NaN becomes 0.
+    alignas(16) float in[4];
+    alignas(16) uint32_t out[4];
+    simde_mm_store_ps(in, src1);
+    for (size_t i = 0; i < 4; i++)
+    {
+        if (!(in[i] > 0.0f))
+            out[i] = 0;
+        else if (in[i] >= 4294967296.0f)
+            out[i] = UINT32_MAX;
+        else
+            out[i] = uint32_t(in[i]);
+    }
+    return simde_mm_load_si128((simde__m128i*)out);
+}
+
 inline simde__m128i simde_mm_vsr(simde__m128i a, simde__m128i b)
 {
     b = simde_mm_srli_epi64(simde_mm_slli_epi64(b, 61), 61);
