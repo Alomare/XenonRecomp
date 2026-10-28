@@ -38,7 +38,8 @@ size_t Function::SearchBlock(size_t address) const
     return -1;
 }
 
-Function Function::Analyze(const void* code, size_t size, size_t base)
+Function Function::Analyze(const void* code, size_t size, size_t base,
+    const std::unordered_map<size_t, std::vector<size_t>>* switchTables)
 {
     Function fn{ base, 0 };
 
@@ -61,6 +62,10 @@ Function Function::Analyze(const void* code, size_t size, size_t base)
 
     #define RESTORE_DATA() if (!blockStack.empty()) data = (dataStart + ((blocks[blockStack.back()].base + blocks[blockStack.back()].size) / sizeof(*data))) - 1; // continue adds one
 
+    // Jump table whose sequence started in the block being walked, if any.
+    const std::vector<size_t>* switchLabels = nullptr;
+    size_t switchBlock = -1;
+
     // TODO: Branch fallthrough
     for (; data <= dataEnd ; ++data)
     {
@@ -70,7 +75,8 @@ Function Function::Analyze(const void* code, size_t size, size_t base)
             break; // it's hideover
         }
 
-        auto& curBlock = blocks[blockStack.back()];
+        const size_t blockIndex = blockStack.back();
+        auto& curBlock = blocks[blockIndex];
         DEBUG(const auto blockBase = curBlock.base);
         const uint32_t instruction = ByteSwap(*data);
 
@@ -91,6 +97,17 @@ Function Function::Analyze(const void* code, size_t size, size_t base)
         }
 
         curBlock.size += 4;
+
+        if (switchTables != nullptr)
+        {
+            const auto table = switchTables->find(addr);
+            if (table != switchTables->end())
+            {
+                switchLabels = &table->second;
+                switchBlock = blockIndex;
+            }
+        }
+
         if (op == PPC_OP_BC) // conditional branches all originate from one opcode, thanks RISC
         {
             if (isLink) // just a conditional call, nothing to see here
@@ -197,6 +214,32 @@ Function Function::Analyze(const void* code, size_t size, size_t base)
                             RESTORE_DATA();
                             continue;
                         }
+                    }
+                    else if (xop == 528 && switchLabels != nullptr && switchBlock == blockIndex)
+                    {
+                        // bctr of a known jump table: every label continues this function.
+                        // The table may be stored inline right after the bctr; keep it in
+                        // the function as a data block so the cases stay contiguous.
+                        const size_t tableBase = addr + 4;
+                        const size_t tableSize = switchLabels->size() * sizeof(uint32_t);
+                        bool inlineTable = tableBase + tableSize <= base + size;
+                        for (size_t i = 0; inlineTable && i < switchLabels->size(); i++)
+                            inlineTable = ByteSwap(data[1 + i]) == (*switchLabels)[i];
+
+                        if (inlineTable && fn.SearchBlock(tableBase) == -1)
+                            blocks.emplace_back(tableBase - base, tableSize);
+
+                        for (size_t label : *switchLabels)
+                        {
+                            if (label >= base && label < base + size && fn.SearchBlock(label) == -1)
+                            {
+                                blocks.emplace_back(label - base, 0);
+                                DEBUG(blocks.back().parent = blockBase);
+                                blockStack.emplace_back(blocks.size() - 1);
+                            }
+                        }
+
+                        switchLabels = nullptr;
                     }
                 }
 

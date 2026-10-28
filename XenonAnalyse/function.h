@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <unordered_map>
 #include <vector>
 
 #ifdef _DEBUG
@@ -47,5 +48,10 @@ struct Function
     }
     
     size_t SearchBlock(size_t address) const;
-    static Function Analyze(const void* code, size_t size, size_t base);
+
+    // switchTables maps the address where a jump table sequence starts to the
+    // table's labels. With it, functions that have no .pdata entry are no longer
+    // cut short at the bctr of a jump table.
+    static Function Analyze(const void* code, size_t size, size_t base,
+        const std::unordered_map<size_t, std::vector<size_t>>* switchTables = nullptr);
 };

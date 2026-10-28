@@ -193,6 +193,10 @@ void Recompiler::Analyse()
         }
     }
 
+    std::unordered_map<size_t, std::vector<size_t>> switchTables;
+    for (const auto& [address, table] : config.switchTables)
+        switchTables[address].assign(table.labels.begin(), table.labels.end());
+
     for (const auto& section : image.sections)
     {
         if (!(section.flags & SectionFlags_Code))
@@ -213,7 +217,7 @@ void Recompiler::Analyse()
                 if (address >= section.base && address < section.base + section.size && image.symbols.find(address) == image.symbols.end())
                 {
                     auto data = section.data + address - section.base;
-                    auto& fn = functions.emplace_back(Function::Analyze(data, section.base + section.size - address, address));
+                    auto& fn = functions.emplace_back(Function::Analyze(data, section.base + section.size - address, address, &switchTables));
                     image.symbols.emplace(fmt::format("sub_{:X}", fn.base), fn.base, fn.size, Symbol_Function);
                 }
             }
@@ -242,7 +246,7 @@ void Recompiler::Analyse()
             }
             else
             {
-                auto& fn = functions.emplace_back(Function::Analyze(data, dataEnd - data, base));
+                auto& fn = functions.emplace_back(Function::Analyze(data, dataEnd - data, base, &switchTables));
                 image.symbols.emplace(fmt::format("sub_{:X}", fn.base), fn.base, fn.size, Symbol_Function);
 
                 base += fn.size;
@@ -2359,6 +2363,21 @@ bool Recompiler::Recompile(
     return true;
 }
 
+// Jump tables can be stored inline right after their bctr instruction.
+static bool IsInlineJumpTable(const uint32_t* data, size_t available, const std::vector<uint32_t>& labels)
+{
+    if (labels.empty() || labels.size() * sizeof(uint32_t) > available)
+        return false;
+
+    for (size_t i = 0; i < labels.size(); i++)
+    {
+        if (ByteSwap(data[i]) != labels[i])
+            return false;
+    }
+
+    return true;
+}
+
 bool Recompiler::Recompile(const Function& fn)
 {
     auto base = fn.base;
@@ -2504,10 +2523,22 @@ bool Recompiler::Recompile(const Function& fn)
             if (insn.opcode->id == PPC_INST_BCTR && (*(data - 1) == 0x07008038 || *(data - 1) == 0x00000060) && switchTable == config.switchTables.end())
                 fmt::println("Found a switch jump table at {:X} with no switch table entry present", base);
 
+            const std::vector<uint32_t>* jumpTableLabels = nullptr;
+            if (insn.opcode->id == PPC_INST_BCTR && switchTable != config.switchTables.end())
+                jumpTableLabels = &switchTable->second.labels;
+
             if (!Recompile(fn, base, insn, data, switchTable, localVariables, csrState))
             {
                 fmt::println("Unrecognized instruction at 0x{:X}: {}", base, insn.opcode->name);
                 allRecompiled = false;
+            }
+
+            // Skip an inline table instead of decoding its entries as instructions.
+            if (jumpTableLabels != nullptr && IsInlineJumpTable(data + 1, end - base - 4, *jumpTableLabels))
+            {
+                println("\t// jump table at {:X}", base + 4);
+                base += jumpTableLabels->size() * sizeof(uint32_t);
+                data += jumpTableLabels->size();
             }
         }
 
