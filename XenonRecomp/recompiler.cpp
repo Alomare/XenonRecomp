@@ -2091,7 +2091,32 @@ bool Recompiler::Recompile(
             }
             break;
 
+        case 3: // float16_2
+            // Packs x and y into one word, x in the high half, like the
+            // FLOAT16_2 vertex format. Converted before any write, since the
+            // source and destination can be the same register.
+            println("\t{}.u32 = (uint32_t(ppc_float_to_half({}.u32[3])) << 16) | ppc_float_to_half({}.u32[2]);", temp(), v(insn.operands[1]), v(insn.operands[1]));
+            if (insn.operands[3] == 1 && insn.operands[4] <= 3)
+            {
+                // 32-bit pack: one word, at the same place as the D3D color case.
+                println("\t{}.u32[{}] = {}.u32;", v(insn.operands[0]), insn.operands[4], temp());
+            }
+            else if (insn.operands[3] == 2 && insn.operands[4] <= 2)
+            {
+                // 64-bit pack: the slot the float16_4 case fills, with the packed
+                // word first and zero after it.
+                println("\t{}.u32[{}] = {}.u32;", v(insn.operands[0]), insn.operands[4] + 1, temp());
+                println("\t{}.u32[{}] = 0;", v(insn.operands[0]), insn.operands[4]);
+            }
+            else
+            {
+                fmt::println("Unimplemented float16_2 pack instruction at {:X}", base);
+                println("\t__builtin_debugtrap();");
+            }
+            break;
+
         default:
+            fmt::println("Unimplemented vpkd3d128 type {} at {:X}", insn.operands[2], base);
             println("\t__builtin_debugtrap();");
             break;
         }
@@ -2296,7 +2321,24 @@ bool Recompiler::Recompile(
             println("\t{} = {};", v(insn.operands[0]), vTemp());
             break;
 
+        case 3: // float16_2
+            // The packed word is the last one, x in its high half, as for 2 shorts.
+            println("\t{}.u32[3] = ppc_half_to_float({}.u16[1]);", vTemp(), v(insn.operands[1]));
+            println("\t{}.u32[2] = ppc_half_to_float({}.u16[0]);", vTemp(), v(insn.operands[1]));
+            println("\t{}.f32[1] = 0.0f;", vTemp());
+            println("\t{}.f32[0] = 1.0f;", vTemp());
+            println("\t{} = {};", v(insn.operands[0]), vTemp());
+            break;
+
+        case 5: // float16_4
+            // The packed words are the last two, in x, y, z, w order.
+            for (size_t i = 0; i < 4; i++)
+                println("\t{}.u32[{}] = ppc_half_to_float({}.u16[{}]);", vTemp(), i, v(insn.operands[1]), i);
+            println("\t{} = {};", v(insn.operands[0]), vTemp());
+            break;
+
         default:
+            fmt::println("Unimplemented vupkd3d128 type {} at {:X}", insn.operands[2] >> 2, base);
             println("\t__builtin_debugtrap();");
             break;
         }

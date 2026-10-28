@@ -700,6 +700,59 @@ inline simde__m128i simde_mm_vctuxs(simde__m128 src1)
     return simde_mm_load_si128((simde__m128i*)out);
 }
 
+// Float bits to half as vpkd3d128 packs them: the mantissa is truncated, and
+// NaN and magnitudes beyond the half range become 0x7FFF, since Xenos halfs
+// have no infinities. Same conversion as the FLOAT16_4 case of vpkd3d128.
+inline uint16_t ppc_float_to_half(uint32_t bits)
+{
+    const uint32_t magnitudeBits = bits & 0x7FFFFFFF;
+    float magnitude;
+    memcpy(&magnitude, &magnitudeBits, sizeof(magnitude));
+
+    uint16_t half;
+    if (magnitude != magnitude || magnitude > 65504.0f)
+    {
+        half = 0x7FFF;
+    }
+    else
+    {
+        const uint32_t exponent = (bits & 0x7F800000) >> 23;
+        const uint32_t mantissa = (bits & 0x7FE000) >> 13;
+        if (exponent > 0x70)
+            half = uint16_t(((exponent - 0x70) << 10) + mantissa);
+        else
+            half = 0x71 - exponent > 31 ? 0 : uint16_t((0x400 + mantissa) >> (0x71 - exponent));
+    }
+
+    return half | uint16_t((bits & 0x80000000) >> 16);
+}
+
+// Half to float bits as vupkd3d128 unpacks them. Xenos halfs have no
+// infinities or NaNs: the top exponent is an ordinary one.
+inline uint32_t ppc_half_to_float(uint16_t half)
+{
+    const uint32_t sign = uint32_t(half & 0x8000) << 16;
+    uint32_t exponent = (half >> 10) & 0x1F;
+    uint32_t mantissa = half & 0x3FF;
+
+    if (exponent == 0)
+    {
+        if (mantissa == 0)
+            return sign;
+
+        // Denormal: normalize it.
+        exponent = 1;
+        while ((mantissa & 0x400) == 0)
+        {
+            mantissa <<= 1;
+            exponent--;
+        }
+        mantissa &= 0x3FF;
+    }
+
+    return sign | ((exponent + 0x70) << 23) | (mantissa << 13);
+}
+
 inline simde__m128i simde_mm_vsr(simde__m128i a, simde__m128i b)
 {
     b = simde_mm_srli_epi64(simde_mm_slli_epi64(b, 61), 61);
