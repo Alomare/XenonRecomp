@@ -197,8 +197,9 @@ Function Function::Analyze(const void* code, size_t size, size_t base,
                 }
                 else if (op == PPC_OP_CTR)
                 {
-                    // 5th bit of BO tells cpu to ignore the counter, which is a blr/bctr otherwise it's conditional
-                    const bool conditional = !(PPC_BO(instruction) & 0x10);
+                    // BO 0x10 ignores the condition and BO 0x04 ignores the counter: only with both is
+                    // it an unconditional blr/bctr. bdzlr and bdnzlr have 0x10 alone and may fall through.
+                    const bool conditional = (PPC_BO(instruction) & 0x14) != 0x14;
                     if (conditional)
                     {
                         // right block's just going to return
