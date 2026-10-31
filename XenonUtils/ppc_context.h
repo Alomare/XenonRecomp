@@ -5,6 +5,7 @@
 #error "ppc_config.h must be included before ppc_context.h"
 #endif
 
+#include <chrono>
 #include <climits>
 #include <cmath>
 #include <csetjmp>
@@ -19,6 +20,16 @@
 // SSE3 constants are missing from simde
 #ifndef _MM_DENORMALS_ZERO_MASK
 #define _MM_DENORMALS_ZERO_MASK 0x0040
+#endif
+
+// Games divide the time base by the Xenon's fixed 49.875 MHz, so a host counter with
+// another rate would make their timers run fast or slow.
+#ifndef PPC_QUERY_TIMEBASE
+inline uint64_t PPC_QUERY_TIMEBASE()
+{
+    const auto now = std::chrono::steady_clock::now().time_since_epoch();
+    return uint64_t(std::chrono::duration_cast<std::chrono::nanoseconds>(now).count()) * 399 / 8000;
+}
 #endif
 
 #define PPC_JOIN(x, y) x##y
